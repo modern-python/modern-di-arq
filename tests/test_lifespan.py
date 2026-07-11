@@ -1,6 +1,7 @@
 import typing
 import warnings
 
+import pytest
 from arq.connections import RedisSettings
 from arq.worker import Worker
 from modern_di import Container, exceptions
@@ -37,6 +38,17 @@ def test_fetch_di_container_reads_root_from_ctx() -> None:
     container = Container(groups=[Dependencies], validate=True)
     ctx = {"modern_di_container": container}
     assert fetch_di_container(ctx) is container
+
+
+def test_setup_di_rejects_double_call() -> None:
+    container = Container(groups=[Dependencies], validate=True)
+
+    class WorkerSettings:
+        functions: typing.ClassVar[list] = []
+
+    setup_di(WorkerSettings, container)
+    with pytest.raises(TypeError, match="setup_di has already been called"):
+        setup_di(WorkerSettings, container)
 
 
 async def test_worker_runs_startup_job_and_shutdown(arq_redis) -> None:  # noqa: ANN001
@@ -93,17 +105,22 @@ async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: AN
     calls: list[str] = []
     container = Container(groups=[Dependencies], validate=True)
 
-    async def user_startup(ctx: dict[str, typing.Any]) -> None:  # noqa: ARG001
+    async def user_startup(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_startup")
+        assert fetch_di_container(ctx).closed is False  # our on_startup already opened the root
 
-    async def user_job_start(ctx: dict[str, typing.Any]) -> None:  # noqa: ARG001
+    async def user_job_start(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_job_start")
+        assert ctx["modern_di_request_container"].closed is False  # our on_job_start already built the child
 
-    async def user_shutdown(ctx: dict[str, typing.Any]) -> None:  # noqa: ARG001
+    async def user_shutdown(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_shutdown")
+        assert fetch_di_container(ctx).closed is False  # our on_shutdown closes the root after the user's hook
 
-    async def user_job_end(ctx: dict[str, typing.Any]) -> None:  # noqa: ARG001
+    async def user_job_end(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_job_end")
+        # our on_job_end closes the child after the user's hook, so it's still live here
+        assert ctx["modern_di_request_container"].closed is False
 
     class WorkerSettings:
         functions: typing.ClassVar[list] = [resolve_job]

@@ -103,6 +103,7 @@ async def test_inject_is_order_insensitive(arq_redis) -> None:  # noqa: ANN001
 
 async def test_inject_passthrough_without_fromdi(arq_redis) -> None:  # noqa: ANN001
     results.clear()
+    assert inject(no_fromdi) is no_fromdi  # no FromDI param: returned unchanged, not wrapped
     container = Container(groups=[Dependencies], validate=True)
     settings = build_settings(container, [inject(no_fromdi)])  # inject returns func unchanged
 

@@ -14,6 +14,7 @@ from modern_di import Container, Scope, providers
 
 _ROOT_CONTAINER_KEY = "modern_di_container"
 _CHILD_CONTAINER_KEY = "modern_di_request_container"
+_WRAPPED_MARKER = "__modern_di_wrapped__"
 
 
 def _get_setting(worker_settings: typing.Any, name: str) -> typing.Any:  # noqa: ANN401
@@ -38,6 +39,7 @@ def _wrap_startup(container: Container, existing: _Hook | None) -> _Hook:
         if existing is not None:
             await existing(ctx)
 
+    setattr(on_startup, _WRAPPED_MARKER, True)
     return on_startup
 
 
@@ -80,12 +82,21 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
     ``Scope.REQUEST`` child per job. Any hook the user already set still runs.
     Accepts a class/object ``worker_settings`` (attribute access) or a ``dict``
     (item access). Returns *container*.
+
+    Raises:
+        TypeError: *worker_settings* was already wired by a prior ``setup_di`` call.
+
     """
+    existing_on_startup = _get_setting(worker_settings, "on_startup")
+    if getattr(existing_on_startup, _WRAPPED_MARKER, False):
+        msg = "setup_di has already been called on this worker_settings"
+        raise TypeError(msg)
+
     ctx = _get_setting(worker_settings, "ctx") or {}
     ctx[_ROOT_CONTAINER_KEY] = container
     _set_setting(worker_settings, "ctx", ctx)
 
-    _set_setting(worker_settings, "on_startup", _wrap_startup(container, _get_setting(worker_settings, "on_startup")))
+    _set_setting(worker_settings, "on_startup", _wrap_startup(container, existing_on_startup))
     _set_setting(
         worker_settings, "on_shutdown", _wrap_shutdown(container, _get_setting(worker_settings, "on_shutdown"))
     )
