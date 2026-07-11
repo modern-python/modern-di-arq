@@ -1,5 +1,6 @@
 import typing
 
+import pytest
 from modern_di import Container, Group, Scope, providers
 
 from modern_di_arq import FromDI, inject, setup_di
@@ -120,3 +121,27 @@ async def test_inject_closes_child_on_task_error(arq_redis) -> None:  # noqa: AN
     await run_burst_worker(settings)  # arq catches the job error; on_job_end still closes the child
 
     assert boom_teardowns == ["closed"]
+
+
+def test_inject_rejects_var_positional_with_fromdi() -> None:
+    async def bad_task(
+        ctx: dict[str, typing.Any],  # noqa: ARG001
+        app_instance: typing.Annotated[AppResource, FromDI(AppResource)],  # noqa: ARG001
+        *args: int,
+    ) -> None:
+        results["never_called"] = args  # pragma: no cover
+
+    with pytest.raises(TypeError):
+        inject(bad_task)
+
+
+def test_inject_rejects_var_keyword_with_fromdi() -> None:
+    async def bad_task(
+        ctx: dict[str, typing.Any],  # noqa: ARG001
+        app_instance: typing.Annotated[AppResource, FromDI(AppResource)],  # noqa: ARG001
+        **kwargs: int,
+    ) -> None:
+        results["never_called"] = kwargs  # pragma: no cover
+
+    with pytest.raises(TypeError):
+        inject(bad_task)

@@ -137,12 +137,29 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
     task signature, so ``functools.wraps`` is safe and no signature rewrite is
     needed. Injection is parameter-order-insensitive (bind-by-name). A task with
     no ``FromDI`` parameter is returned unchanged.
+
+    Raises:
+        TypeError: ``func`` declares ``*args``/``**kwargs`` alongside a ``FromDI``
+            parameter. ``inspect.Signature.bind`` stores those under the literal
+            names ``"args"``/``"kwargs"``, which the wrapper's
+            ``**bound.arguments`` unpacking would silently misroute; use explicit
+            named parameters instead.
+
     """
     di_params = _parse_inject_params(func)
     if not di_params:
         return func
 
     signature = inspect.signature(func)
+    for name, param in signature.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            func_name = getattr(func, "__qualname__", repr(func))
+            msg = (
+                f"@inject task {func_name!r} declares *args/**kwargs (parameter {name!r}), "
+                "which is unsupported; use explicit named parameters instead of *args/**kwargs with @inject."
+            )
+            raise TypeError(msg)
+
     visible_params = [p for name, p in signature.parameters.items() if name not in di_params]
     visible_signature = signature.replace(parameters=visible_params)
 
