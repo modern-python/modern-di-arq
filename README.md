@@ -1,4 +1,10 @@
-# modern-di-arq
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/modern-di-arq/lockup-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/modern-di-arq/lockup-light.svg">
+    <img alt="modern-di-arq" src="https://raw.githubusercontent.com/modern-python/.github/main/brand/projects/modern-di-arq/lockup.png" width="420">
+  </picture>
+</p>
 
 [![PyPI version](https://img.shields.io/pypi/v/modern-di-arq.svg)](https://pypi.org/project/modern-di-arq/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/modern-di-arq.svg)](https://pypi.org/project/modern-di-arq/)
