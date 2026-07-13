@@ -4,12 +4,11 @@ The integration manipulates arq's ``ctx`` dict, its lifecycle hook callables,
 and a settings class/dict structurally, so this module needs no arq import.
 """
 
-import dataclasses
 import functools
 import inspect
 import typing
 
-from modern_di import Container, Scope, providers
+from modern_di import Container, Scope, integrations
 
 
 _ROOT_CONTAINER_KEY = "modern_di_container"
@@ -111,34 +110,9 @@ def fetch_di_container(ctx: dict[str, typing.Any]) -> Container:
 
 
 T = typing.TypeVar("T")
-T_co = typing.TypeVar("T_co", covariant=True)
 
 
-@dataclasses.dataclass(slots=True, frozen=True)
-class _FromDI(typing.Generic[T_co]):
-    dependency: "providers.AbstractProvider[T_co] | type[T_co]"
-
-
-def FromDI(dependency: "providers.AbstractProvider[T] | type[T]") -> T:  # noqa: N802
-    """Mark a task parameter for injection.
-
-    Use as ``Annotated[T, FromDI(provider_or_type)]`` on an ``inject``-decorated task.
-    """
-    return typing.cast(T, _FromDI(dependency))
-
-
-def _parse_inject_params(func: typing.Callable[..., typing.Any]) -> dict[str, _FromDI[typing.Any]]:
-    hints = typing.get_type_hints(func, include_extras=True)
-    di_params: dict[str, _FromDI[typing.Any]] = {}
-    for name, hint in hints.items():
-        if name == "return":
-            continue
-        if typing.get_origin(hint) is typing.Annotated:
-            for meta in typing.get_args(hint)[1:]:
-                if isinstance(meta, _FromDI):
-                    di_params[name] = meta
-                    break
-    return di_params
+FromDI = integrations.from_di
 
 
 def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[..., typing.Awaitable[T]]:
@@ -157,7 +131,7 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
             named parameters instead.
 
     """
-    di_params = _parse_inject_params(func)
+    di_params = integrations.parse_markers(func)
     if not di_params:
         return func
 
@@ -178,7 +152,7 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
     async def wrapper(*args: typing.Any, **kwargs: typing.Any) -> T:  # noqa: ANN401
         ctx = typing.cast("dict[str, typing.Any]", args[0])
         child = typing.cast(Container, ctx[_CHILD_CONTAINER_KEY])
-        resolved = {name: child.resolve_dependency(marker.dependency) for name, marker in di_params.items()}
+        resolved = integrations.resolve_markers(child, di_params)
         bound = visible_signature.bind(*args, **kwargs)
         bound.apply_defaults()
         return await func(**bound.arguments, **resolved)
