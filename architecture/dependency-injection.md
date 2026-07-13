@@ -87,16 +87,16 @@ optimized).
 
 ## Resolution
 
-`FromDI(dependency)` returns an inert marker (`_FromDI`, a frozen, slotted
-dataclass wrapping a provider or a bare type) — it does nothing on its own.
-Parameters opt into injection by annotating them
-`typing.Annotated[SomeType, FromDI(dependency)]`.
+`FromDI` is `modern_di.integrations.from_di` — its marker factory. Calling
+`FromDI(dependency)` returns an inert `Marker(dependency)` wrapping a
+provider or a bare type; it does nothing on its own. Parameters opt into
+injection by annotating them `typing.Annotated[SomeType, FromDI(dependency)]`.
 
 `inject`:
 
-1. `_parse_inject_params` scans the resolved type hints
+1. `integrations.parse_markers(func)` scans the resolved type hints
    (`typing.get_type_hints(func, include_extras=True)`) for `Annotated`
-   parameters carrying a `_FromDI` marker.
+   parameters carrying a `Marker`.
 2. If none are found, `func` is returned unchanged — `inject` short-circuits
    without building a wrapper.
 3. Otherwise it walks `inspect.signature(func).parameters` and raises
@@ -108,10 +108,12 @@ Parameters opt into injection by annotating them
 5. It builds an `async def wrapper(*args, **kwargs)` decorated with
    `functools.wraps(func)`. At call time the wrapper reads `ctx = args[0]`
    (arq always calls a task as `coroutine(ctx, *args, **kwargs)`), reads the
-   per-job child off `ctx[_CHILD_CONTAINER_KEY]`, resolves each `FromDI`
-   dependency via `child.resolve_dependency(marker.dependency)` — which
-   dispatches to `resolve_provider` for a provider instance and to `resolve`
-   (by type) otherwise — binds the incoming `args`/`kwargs` against
+   per-job child off `ctx[_CHILD_CONTAINER_KEY]`, resolves every `FromDI`
+   dependency via `integrations.resolve_markers(child, di_params)` — which
+   calls each `Marker.resolve(container)`, itself
+   `container.resolve_dependency(...)`, dispatching to `resolve_provider`
+   for a provider instance and to `resolve` (by type) otherwise — binds the
+   incoming `args`/`kwargs` against
    `visible_signature` (`bind` + `apply_defaults`), and calls `func` with the
    bound arguments plus the resolved ones merged in by name. Injection is
    therefore **order-insensitive**: a `FromDI` parameter may appear anywhere
