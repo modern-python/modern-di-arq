@@ -76,8 +76,13 @@ and still fires `on_job_end`).
 ## Per-job scope
 
 `on_job_start` builds one `Scope.REQUEST` child per job —
-`root.build_child_container(scope=Scope.REQUEST)` — and stashes it under
-`_CHILD_CONTAINER_KEY` on that job's `ctx`. `on_job_end` closes it with
+`root.build_child_container(scope=Scope.REQUEST)` — opens it with a bare
+`child.open()` (modern-di 3.x's mandatory-open lifecycle: resolving from an
+unopened container raises `ContainerClosedError`), and stashes it under
+`_CHILD_CONTAINER_KEY` on that job's `ctx`. The build happens in
+`on_job_start` and the close happens in `on_job_end` — two different
+hooks — so the child cannot be opened via a `with` block; it is opened with
+a bare call instead. `on_job_end` closes it with
 `close_async()`, unconditionally: because the compose ordering runs the
 user's `on_job_end` first and the close second, the child is torn down
 whether the task raised or returned, and it happens even for a task that was
