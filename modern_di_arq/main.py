@@ -54,7 +54,9 @@ def _wrap_shutdown(container: Container, existing: _Hook | None) -> _Hook:
 def _wrap_job_start(existing: _Hook | None) -> _Hook:
     async def on_job_start(ctx: dict[str, typing.Any]) -> None:
         root = typing.cast(Container, ctx[_ROOT_CONTAINER_KEY])
-        ctx[_CHILD_CONTAINER_KEY] = root.build_child_container(scope=Scope.REQUEST)
+        child = root.build_child_container(scope=Scope.REQUEST)
+        child.open()
+        ctx[_CHILD_CONTAINER_KEY] = child
         if existing is not None:
             await existing(ctx)
 
