@@ -84,10 +84,12 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
 
     Seeds the root container into the worker ``ctx`` (arq's state store) and
     wraps the worker's lifecycle hooks: ``on_startup``/``on_shutdown`` open and
-    close the root; ``on_job_start``/``on_job_end`` build and close a
-    ``Scope.REQUEST`` child per job. Any hook the user already set still runs.
-    Accepts a class/object ``worker_settings`` (attribute access) or a ``dict``
-    (item access). Returns *container*.
+    close the root; ``on_job_start`` builds an unopened ``Scope.REQUEST`` child
+    per job, which an ``@inject``-decorated task owns opening and closing
+    around its own body (``on_job_end`` only closes it as a safety net). Any
+    hook the user already set still runs. Accepts a class/object
+    ``worker_settings`` (attribute access) or a ``dict`` (item access).
+    Returns *container*.
 
     Raises:
         TypeError: *worker_settings* was already wired by a prior ``setup_di`` call.
