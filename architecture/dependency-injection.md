@@ -13,18 +13,22 @@ version that keeps that shape.
 arq's `ctx` dict is the framework's state store — the worker builds
 `self.ctx`, then merges `{**self.ctx, **job_ctx}` into a fresh dict per job
 and passes that same dict through `on_job_start`, the task coroutine, and
-`on_job_end`. Two named constants hand the container through it, so the
-writer and every reader stay in provable agreement instead of relying on bare
-string literals:
+`on_job_end`. Three named constants hand the container (and its per-job
+open/close bookkeeping) through it, so the writer and every reader stay in
+provable agreement instead of relying on bare string literals:
 
 - `_ROOT_CONTAINER_KEY = "modern_di_container"` — the root container, seeded
   into the worker `ctx` by `setup_di` and read back by `fetch_di_container`
   and by `on_job_start` (to build the per-job child).
 - `_CHILD_CONTAINER_KEY = "modern_di_request_container"` — the per-job
   `Scope.REQUEST` child, built (unopened) on the per-job `ctx` by
-  `on_job_start`, and opened/closed by `inject`'s wrapper around the task
-  body it decorates (see "Per-job scope" below). `on_job_end` only closes it
-  as a safety net.
+  `on_job_start`, and opened/closed by `inject`'s wrapper(s) around the task
+  body/bodies they decorate (see "Per-job scope" below). `on_job_end` only
+  closes it as a safety net.
+- `_CHILD_DEPTH_KEY = "modern_di_request_container_depth"` — the per-job
+  open depth counter `inject`'s wrapper reads and writes, so nested and
+  concurrent `@inject` calls sharing one `ctx` share one open child and close
+  it exactly once (see "Guaranteed teardown" below).
 
 ## `setup_di` and hook composition
 
@@ -87,31 +91,52 @@ wrapper's call is on the stack (see below), so building it unopened means
 nothing has been resolved yet if a user `on_job_start` hook then raises —
 there is nothing to leak.
 
-### Guaranteed teardown: the wrapper owns open/close
+### Guaranteed teardown: the wrapper reference-counts open/close
 
 `inject`'s wrapper is the task body and runs inside arq's own caught
 `try` (`run_job` catches a task's exception itself), so a `finally` there is
 guaranteed to run — including when arq's `on_job_end` is later skipped, e.g.
 it fails to serialize an unpicklable job result/exception after the task
-already returned. The wrapper takes **ownership** of the child by checking
-whether it is closed on entry:
+already returned. The wrapper tracks a per-job **depth counter** under
+`_CHILD_DEPTH_KEY` on `ctx`, opening on the 0→1 transition and closing on the
+1→0 transition:
 
 ```python
-owns = child.closed  # open (and own the close) only if not already open
-if owns:
+depth = ctx.get(_CHILD_DEPTH_KEY, 0)
+if depth == 0:
     child.open()
+ctx[_CHILD_DEPTH_KEY] = depth + 1
 try:
     ...  # resolve markers, call func
 finally:
-    if owns:
+    ctx[_CHILD_DEPTH_KEY] -= 1
+    if ctx[_CHILD_DEPTH_KEY] == 0:
         await child.close_async()
 ```
 
-This is what makes **nested `@inject`** safe: an outer `@inject` task that
-awaits an inner `@inject`-decorated function passing the same `ctx` finds
-the child already open on the inner call (`owns=False`), so the inner call
-resolves against it but does not close it; only the outer (owning) call's
-`finally` closes it, exactly once, after the outer task returns.
+The check/open/increment (and the decrement/close) run with no `await` in
+between, so a single `@inject` call's entry and exit are each atomic from
+asyncio's point of view — the event loop cannot interleave another task's
+entry into the middle of one. This is what makes both **nested and
+concurrent `@inject`** safe:
+
+- **Nested**: an outer `@inject` task that awaits an inner
+  `@inject`-decorated function passing the same `ctx` finds the child already
+  open on the inner call (`depth=1`), increments to `depth=2`, and its own
+  `finally` only decrements back to `1` — it does not close. Only the outer
+  call's `finally`, decrementing `1→0`, closes the child.
+- **Concurrent fan-out**: a job coroutine that is *not* itself `@inject` can
+  `asyncio.gather` two or more `@inject`-decorated helpers over the same
+  `ctx`. Whichever sibling's task step runs first opens the child (`0→1`);
+  every other sibling that enters before the child is closed again just
+  increments the depth and reuses it. Each sibling's own `finally`
+  decrements; the child is closed exactly once, when the *last* sibling to
+  exit brings the depth back to `0` — regardless of which sibling happened to
+  open it or which finishes first. Earlier boolean ownership (`owns =
+  child.closed`) got this wrong under fan-out: whichever sibling finished
+  first believed it alone owned the child and closed it in its `finally`,
+  even while a slower sibling was still mid-body — a use-after-finalize on
+  the REQUEST-scoped resource the slower sibling was still holding.
 
 A task with no `FromDI` parameter, or one that isn't decorated with
 `@inject`, never opens the child at all — it stays closed for that job's
@@ -119,14 +144,16 @@ entire span, and `on_job_end`'s safety net finds nothing to close.
 
 ### `on_job_end` is a safety net, not the primary teardown
 
-`on_job_end` pops the child and closes it **only if still open**
-(`if child is not None and not child.closed`). In the ordinary case this is
-a no-op: the owning `@inject` wrapper already closed the child before the
-task returned, or no `@inject` task ever opened it. It only does real work
-if something left the child open across the task boundary (e.g. code that
-opens and resolves from the child directly instead of via `@inject`).
-`Container.open()`/`close_async()` are both idempotent, so this composes
-safely with the wrapper regardless of ordering.
+`on_job_end` pops the child and the depth counter
+(`ctx.pop(_CHILD_DEPTH_KEY, None)`, for cleanliness — the depth is job-scoped
+and the `ctx` dict does not outlive the job) and closes the child **only if
+still open** (`if child is not None and not child.closed`). In the ordinary
+case this is a no-op: the last `@inject` wrapper to exit already closed the
+child before the task returned, or no `@inject` task ever opened it. It only
+does real work if something left the child open across the task boundary
+(e.g. code that opens and resolves from the child directly instead of via
+`@inject`). `Container.open()`/`close_async()` are both idempotent, so this
+composes safely with the wrapper regardless of ordering.
 
 ### Contract change from `on_job_start` unconditionally opening the child
 
