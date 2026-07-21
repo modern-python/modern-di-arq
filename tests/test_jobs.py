@@ -4,6 +4,7 @@ import pytest
 from modern_di import Container, Group, Scope, providers
 
 from modern_di_arq import FromDI, inject, setup_di
+from modern_di_arq.main import _CHILD_CONTAINER_KEY, _ROOT_CONTAINER_KEY, _wrap_job_end, _wrap_job_start
 from tests.conftest import run_burst_worker
 from tests.dependencies import (
     AppResource,
@@ -122,6 +123,101 @@ async def test_inject_closes_child_on_task_error(arq_redis) -> None:  # noqa: AN
     await run_burst_worker(settings)  # arq catches the job error; on_job_end still closes the child
 
     assert boom_teardowns == ["closed"]
+
+
+async def test_wrapper_guarantees_close_without_on_job_end() -> None:
+    """The wrapper's own `finally` closes the child, so a skipped on_job_end leaks nothing."""
+    results.clear()
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies], validate=True)
+    container.open()
+    ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
+    await _wrap_job_start(None)(ctx)
+    child = ctx[_CHILD_CONTAINER_KEY]
+    assert child.closed is True  # built unopened by on_job_start
+
+    await resolves_app_and_request(ctx, 7)  # invoke the @inject wrapper directly; on_job_end never runs
+
+    assert results == {"app_ok": True, "request_ok": True, "x": 7, "linked": True}
+    assert child.closed is True  # wrapper opened it, then closed it in its own finally
+    assert request_teardowns == ["request-closed"]
+
+
+async def test_wrapper_closes_child_when_task_raises_without_on_job_end() -> None:
+    """The wrapper's `finally` closes the child even when the task raises, without on_job_end."""
+    boom_teardowns.clear()
+    container = Container(groups=[Boom], validate=True)
+    container.open()
+    ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
+    await _wrap_job_start(None)(ctx)
+    child = ctx[_CHILD_CONTAINER_KEY]
+
+    with pytest.raises(ValueError, match="boom"):
+        await raiser(ctx)
+
+    assert child.closed is True
+    assert boom_teardowns == ["closed"]
+
+
+nested_calls: dict[str, typing.Any] = {}
+
+
+@inject
+async def inner_task(
+    ctx: dict[str, typing.Any],
+    app_instance: typing.Annotated[AppResource, FromDI(AppResource)],
+) -> AppResource:
+    nested_calls["inner_child_closed_during_call"] = ctx[_CHILD_CONTAINER_KEY].closed
+    return app_instance
+
+
+@inject
+async def outer_task(
+    ctx: dict[str, typing.Any],
+    request_instance: typing.Annotated[RequestResource, FromDI(Dependencies.request_factory)],
+) -> None:
+    nested_calls["request_ok"] = isinstance(request_instance, RequestResource)
+    inner_result = await inner_task(ctx)
+    nested_calls["inner_ok"] = isinstance(inner_result, AppResource)
+    nested_calls["child_closed_after_inner_returns"] = ctx[_CHILD_CONTAINER_KEY].closed
+
+
+async def test_nested_inject_inner_does_not_close_shared_child() -> None:
+    """Only the outer (owning) wrapper closes the shared child; the inner call must not."""
+    nested_calls.clear()
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies], validate=True)
+    container.open()
+    ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
+    await _wrap_job_start(None)(ctx)
+    child = ctx[_CHILD_CONTAINER_KEY]
+
+    await outer_task(ctx)
+
+    assert nested_calls["request_ok"] is True
+    assert nested_calls["inner_ok"] is True
+    assert nested_calls["inner_child_closed_during_call"] is False
+    assert nested_calls["child_closed_after_inner_returns"] is False  # inner did not close it
+    assert child.closed is True  # outer, the owner, closed it once after returning
+    assert request_teardowns == ["request-closed"]  # finalizer ran exactly once
+
+
+async def test_on_job_end_safety_net_closes_a_still_open_child() -> None:
+    """on_job_end is a safety net: it closes the child only when some non-@inject path left it open."""
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies], validate=True)
+    container.open()
+    ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
+    await _wrap_job_start(None)(ctx)
+    child = ctx[_CHILD_CONTAINER_KEY]
+    child.open()  # simulate a non-@inject task resolving directly, leaving the child open
+    child.resolve_dependency(Dependencies.request_factory)
+
+    await _wrap_job_end(None)(ctx)
+
+    assert child.closed is True
+    assert _CHILD_CONTAINER_KEY not in ctx
+    assert request_teardowns == ["request-closed"]
 
 
 def test_inject_rejects_var_positional_with_fromdi() -> None:

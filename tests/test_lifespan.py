@@ -7,14 +7,17 @@ from arq.worker import Worker
 from modern_di import Container, exceptions
 
 import modern_di_arq
-from modern_di_arq import fetch_di_container, setup_di
+from modern_di_arq import FromDI, fetch_di_container, inject, setup_di
 from tests.conftest import REDIS_URL, run_burst_worker
-from tests.dependencies import Dependencies, app_teardowns, request_teardowns
+from tests.dependencies import Dependencies, RequestResource, app_teardowns, request_teardowns
 
 
-async def resolve_job(ctx: dict[str, typing.Any]) -> None:
-    child = ctx["modern_di_request_container"]
-    child.resolve_dependency(Dependencies.request_factory)  # REQUEST-scoped (child)
+@inject
+async def resolve_job(
+    ctx: dict[str, typing.Any],
+    _dep: typing.Annotated[RequestResource, FromDI(Dependencies.request_factory)],
+) -> None:
+    pass  # the @inject wrapper resolves the REQUEST-scoped dependency; nothing else to do
 
 
 def make_settings(container: Container) -> type:
@@ -111,7 +114,9 @@ async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: AN
 
     async def user_job_start(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_job_start")
-        assert ctx["modern_di_request_container"].closed is False  # our on_job_start already built the child
+        # on_job_start builds the child but no longer opens it — it opens only within an
+        # @inject wrapper's ownership span, so the hook sees it closed
+        assert ctx["modern_di_request_container"].closed is True
 
     async def user_shutdown(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_shutdown")
@@ -119,8 +124,9 @@ async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: AN
 
     async def user_job_end(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_job_end")
-        # our on_job_end closes the child after the user's hook, so it's still live here
-        assert ctx["modern_di_request_container"].closed is False
+        # the @inject wrapper already opened and closed the child around the task body,
+        # so by the time on_job_end's safety net runs, it's already closed
+        assert ctx["modern_di_request_container"].closed is True
 
     class WorkerSettings:
         functions: typing.ClassVar[list] = [resolve_job]
