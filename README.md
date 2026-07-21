@@ -29,7 +29,7 @@ uv add modern-di-arq      # or: pip install modern-di-arq
 
 ## Usage
 
-`setup_di` seeds the root container into arq's `ctx` dict and wires four of arq's lifecycle hooks: `on_startup`/`on_shutdown` open and close the root container, and `on_job_start`/`on_job_end` build and close a `Scope.REQUEST` child container around each job. Decorate a task with `@inject` to resolve its `FromDI`-marked parameters from that per-job child.
+`setup_di` seeds the root container into arq's `ctx` dict and wires four of arq's lifecycle hooks: `on_startup`/`on_shutdown` open and close the root container, and `on_job_start` builds a `Scope.REQUEST` child container per job. Decorate a task with `@inject` to resolve its `FromDI`-marked parameters from that per-job child — the child is open only while `@inject`-decorated task body/bodies are running, reference-counted so nested and concurrent (`asyncio.gather`) `@inject` calls over the same job share one open child and close it exactly once, guaranteeing teardown even if arq skips `on_job_end`.
 
 ```python
 import typing

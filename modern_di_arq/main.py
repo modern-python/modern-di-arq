@@ -13,6 +13,7 @@ from modern_di import Container, Scope, integrations
 
 _ROOT_CONTAINER_KEY = "modern_di_container"
 _CHILD_CONTAINER_KEY = "modern_di_request_container"
+_CHILD_DEPTH_KEY = "modern_di_request_container_depth"
 _WRAPPED_MARKER = "__modern_di_wrapped__"
 
 
@@ -54,8 +55,9 @@ def _wrap_shutdown(container: Container, existing: _Hook | None) -> _Hook:
 def _wrap_job_start(existing: _Hook | None) -> _Hook:
     async def on_job_start(ctx: dict[str, typing.Any]) -> None:
         root = typing.cast(Container, ctx[_ROOT_CONTAINER_KEY])
+        # Built unopened: `@inject`'s wrapper(s) refcount open/close (see `inject`),
+        # so the child stays closed here even if a user hook resolves-then-raises below.
         child = root.build_child_container(scope=Scope.REQUEST)
-        child.open()
         ctx[_CHILD_CONTAINER_KEY] = child
         if existing is not None:
             await existing(ctx)
@@ -68,8 +70,13 @@ def _wrap_job_end(existing: _Hook | None) -> _Hook:
         if existing is not None:
             await existing(ctx)
         child = ctx.pop(_CHILD_CONTAINER_KEY, None)
-        if child is not None:
-            await child.close_async()  # never leak the per-job child, even on the error path
+        ctx.pop(_CHILD_DEPTH_KEY, None)
+        # Safety net only: normally the owning `@inject` wrapper(s) already closed the
+        # child in their own `finally`, or it was never opened (no `@inject` task) —
+        # both are no-ops here. Only closes if still open (e.g. a non-`@inject` task
+        # left it open, or arq itself raised between the task and this hook).
+        if child is not None and not child.closed:
+            await child.close_async()
 
     return on_job_end
 
@@ -79,10 +86,14 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
 
     Seeds the root container into the worker ``ctx`` (arq's state store) and
     wraps the worker's lifecycle hooks: ``on_startup``/``on_shutdown`` open and
-    close the root; ``on_job_start``/``on_job_end`` build and close a
-    ``Scope.REQUEST`` child per job. Any hook the user already set still runs.
-    Accepts a class/object ``worker_settings`` (attribute access) or a ``dict``
-    (item access). Returns *container*.
+    close the root; ``on_job_start`` builds an unopened ``Scope.REQUEST`` child
+    per job, opened and closed by ``@inject``-decorated task(s) around their
+    own bodies — reference-counted, so nested and concurrent (``asyncio.gather``)
+    ``@inject`` calls over the same job share one open child, closed exactly
+    once by the last to exit (``on_job_end`` only closes it as a safety net).
+    Any hook the user already set still runs. Accepts a class/object
+    ``worker_settings`` (attribute access) or a ``dict`` (item access).
+    Returns *container*.
 
     Raises:
         TypeError: *worker_settings* was already wired by a prior ``setup_di`` call.
@@ -154,9 +165,24 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
     async def wrapper(*args: typing.Any, **kwargs: typing.Any) -> T:  # noqa: ANN401
         ctx = typing.cast("dict[str, typing.Any]", args[0])
         child = typing.cast(Container, ctx[_CHILD_CONTAINER_KEY])
-        resolved = integrations.resolve_markers(child, di_params)
-        bound = visible_signature.bind(*args, **kwargs)
-        bound.apply_defaults()
-        return await func(**bound.arguments, **resolved)
+        # Reference-count opens so nested AND concurrent (@inject fan-out via gather)
+        # share one open child and close it exactly once, when the LAST @inject body
+        # exits. The check/open/increment run without an await, so asyncio cannot
+        # interleave them — the count is consistent under concurrency.
+        depth = ctx.get(_CHILD_DEPTH_KEY, 0)
+        if depth == 0:
+            child.open()
+        ctx[_CHILD_DEPTH_KEY] = depth + 1
+        try:
+            resolved = integrations.resolve_markers(child, di_params)
+            bound = visible_signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            return await func(**bound.arguments, **resolved)
+        finally:
+            # Guarantees teardown even if arq skips on_job_end (e.g. it fails to
+            # serialize an unpicklable job result/exception after the task runs).
+            ctx[_CHILD_DEPTH_KEY] -= 1
+            if ctx[_CHILD_DEPTH_KEY] == 0:
+                await child.close_async()
 
     return wrapper
