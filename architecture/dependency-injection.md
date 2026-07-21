@@ -21,8 +21,10 @@ string literals:
   into the worker `ctx` by `setup_di` and read back by `fetch_di_container`
   and by `on_job_start` (to build the per-job child).
 - `_CHILD_CONTAINER_KEY = "modern_di_request_container"` — the per-job
-  `Scope.REQUEST` child, stashed on the per-job `ctx` by `on_job_start`, read
-  by `inject`'s wrapper, and closed by `on_job_end`.
+  `Scope.REQUEST` child, built (unopened) on the per-job `ctx` by
+  `on_job_start`, and opened/closed by `inject`'s wrapper around the task
+  body it decorates (see "Per-job scope" below). `on_job_end` only closes it
+  as a safety net.
 
 ## `setup_di` and hook composition
 
@@ -48,17 +50,19 @@ hooks, so a user hook always observes a live container:
 
 - `on_startup`: `container.open()` runs, *then* the existing hook (the user
   hook starts with an open root).
-- `on_job_start`: the `Scope.REQUEST` child is built, *then* the existing
-  hook (the user hook can resolve from the child).
-- `on_job_end`: the existing hook runs *first*, *then* the child is closed
-  (the user hook still has a live child).
+- `on_job_start`: the `Scope.REQUEST` child is built (unopened), *then* the
+  existing hook. The child is **closed** at this point — a user
+  `on_job_start` hook cannot resolve from it; only an `@inject`-decorated
+  task can (see "Per-job scope").
+- `on_job_end`: the existing hook runs *first*, *then* the safety-net close.
+  By this point the owning `@inject` wrapper has normally already closed the
+  child, so both the existing hook and the safety net usually see it closed.
 - `on_shutdown`: the existing hook runs *first*, *then* `container.close_async()`
   (the user hook still has an open root).
 
-`on_job_end` pops the child with `ctx.pop(_CHILD_CONTAINER_KEY, None)` and is
-a no-op if absent — defensive only; arq always pairs `on_job_start`/`on_job_end`
-around a job, including the error path (arq catches a task's exception itself
-and still fires `on_job_end`).
+`on_job_end` pops the child with `ctx.pop(_CHILD_CONTAINER_KEY, None)` and
+closes it only `if child is not None and not child.closed` — a safety net,
+not the primary teardown path (see "Per-job scope").
 
 ## Root lifecycle
 
@@ -76,19 +80,64 @@ and still fires `on_job_end`).
 ## Per-job scope
 
 `on_job_start` builds one `Scope.REQUEST` child per job —
-`root.build_child_container(scope=Scope.REQUEST)` — opens it with a bare
-`child.open()` (modern-di 3.x's mandatory-open lifecycle: resolving from an
-unopened container raises `ContainerClosedError`), and stashes it under
-`_CHILD_CONTAINER_KEY` on that job's `ctx`. The build happens in
-`on_job_start` and the close happens in `on_job_end` — two different
-hooks — so the child cannot be opened via a `with` block; it is opened with
-a bare call instead. `on_job_end` closes it with
-`close_async()`, unconditionally: because the compose ordering runs the
-user's `on_job_end` first and the close second, the child is torn down
-whether the task raised or returned, and it happens even for a task that was
-never decorated with `@inject` (a child is built for every job regardless of
-whether anything reads it back — see the non-goals note in the design; not
-optimized).
+`root.build_child_container(scope=Scope.REQUEST)` — and stashes it,
+**unopened**, under `_CHILD_CONTAINER_KEY` on that job's `ctx`. It is not
+opened here: a `Scope.REQUEST` child is only ever open while an `@inject`
+wrapper's call is on the stack (see below), so building it unopened means
+nothing has been resolved yet if a user `on_job_start` hook then raises —
+there is nothing to leak.
+
+### Guaranteed teardown: the wrapper owns open/close
+
+`inject`'s wrapper is the task body and runs inside arq's own caught
+`try` (`run_job` catches a task's exception itself), so a `finally` there is
+guaranteed to run — including when arq's `on_job_end` is later skipped, e.g.
+it fails to serialize an unpicklable job result/exception after the task
+already returned. The wrapper takes **ownership** of the child by checking
+whether it is closed on entry:
+
+```python
+owns = child.closed  # open (and own the close) only if not already open
+if owns:
+    child.open()
+try:
+    ...  # resolve markers, call func
+finally:
+    if owns:
+        await child.close_async()
+```
+
+This is what makes **nested `@inject`** safe: an outer `@inject` task that
+awaits an inner `@inject`-decorated function passing the same `ctx` finds
+the child already open on the inner call (`owns=False`), so the inner call
+resolves against it but does not close it; only the outer (owning) call's
+`finally` closes it, exactly once, after the outer task returns.
+
+A task with no `FromDI` parameter, or one that isn't decorated with
+`@inject`, never opens the child at all — it stays closed for that job's
+entire span, and `on_job_end`'s safety net finds nothing to close.
+
+### `on_job_end` is a safety net, not the primary teardown
+
+`on_job_end` pops the child and closes it **only if still open**
+(`if child is not None and not child.closed`). In the ordinary case this is
+a no-op: the owning `@inject` wrapper already closed the child before the
+task returned, or no `@inject` task ever opened it. It only does real work
+if something left the child open across the task boundary (e.g. code that
+opens and resolves from the child directly instead of via `@inject`).
+`Container.open()`/`close_async()` are both idempotent, so this composes
+safely with the wrapper regardless of ordering.
+
+### Contract change from `on_job_start` unconditionally opening the child
+
+Earlier versions opened the child in `on_job_start` and closed it
+unconditionally in `on_job_end`, so it was live across the whole
+`on_job_start`→`on_job_end` span — a user-supplied `on_job_start` or
+`on_job_end` hook could resolve straight from
+`ctx[_CHILD_CONTAINER_KEY]`. That window is gone: the child is now open only
+inside an `@inject` wrapper's call. `_CHILD_CONTAINER_KEY` was always a
+private key, and the supported way to resolve a per-job dependency is
+`@inject`, not reading the hook's `ctx` directly.
 
 ## Resolution
 
