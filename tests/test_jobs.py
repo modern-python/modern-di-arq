@@ -1,3 +1,4 @@
+import asyncio
 import typing
 
 import pytest
@@ -200,6 +201,57 @@ async def test_nested_inject_inner_does_not_close_shared_child() -> None:
     assert nested_calls["child_closed_after_inner_returns"] is False  # inner did not close it
     assert child.closed is True  # outer, the owner, closed it once after returning
     assert request_teardowns == ["request-closed"]  # finalizer ran exactly once
+
+
+concurrent_calls: dict[str, typing.Any] = {}
+
+
+@inject
+async def fast_sibling(
+    ctx: dict[str, typing.Any],  # noqa: ARG001
+    request_instance: typing.Annotated[RequestResource, FromDI(Dependencies.request_factory)],
+) -> None:
+    concurrent_calls["fast_request_instance"] = request_instance
+    await asyncio.sleep(0)  # yield once so the slow sibling can open concurrently
+    concurrent_calls["fast_alive_after_yield"] = not request_teardowns
+
+
+@inject
+async def slow_sibling(
+    ctx: dict[str, typing.Any],  # noqa: ARG001
+    request_instance: typing.Annotated[RequestResource, FromDI(Dependencies.request_factory)],
+) -> None:
+    concurrent_calls["slow_request_instance"] = request_instance
+    await asyncio.sleep(0.05)  # outlives fast_sibling
+    concurrent_calls["slow_alive_after_yield"] = not request_teardowns
+
+
+async def fanout_job(ctx: dict[str, typing.Any]) -> None:
+    """Not @inject itself: fans out two @inject siblings over the same ctx."""
+    await asyncio.gather(fast_sibling(ctx), slow_sibling(ctx))
+
+
+async def test_concurrent_inject_fanout_shares_one_child() -> None:
+    """Two `@inject` siblings fanned out via `asyncio.gather` over the same ctx.
+
+    They must share one open child, refcounted, and close it exactly once — only
+    when the last sibling exits.
+    """
+    concurrent_calls.clear()
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies], validate=True)
+    container.open()
+    ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
+    await _wrap_job_start(None)(ctx)
+    child = ctx[_CHILD_CONTAINER_KEY]
+
+    await fanout_job(ctx)
+
+    assert concurrent_calls["fast_request_instance"] is concurrent_calls["slow_request_instance"]
+    assert concurrent_calls["fast_alive_after_yield"] is True
+    assert concurrent_calls["slow_alive_after_yield"] is True  # not finalized while slow was still running
+    assert child.closed is True  # closed after the last (slow) sibling exits
+    assert request_teardowns == ["request-closed"]  # finalizer fired exactly once
 
 
 async def test_on_job_end_safety_net_closes_a_still_open_child() -> None:
