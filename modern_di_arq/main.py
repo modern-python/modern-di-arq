@@ -54,8 +54,9 @@ def _wrap_shutdown(container: Container, existing: _Hook | None) -> _Hook:
 def _wrap_job_start(existing: _Hook | None) -> _Hook:
     async def on_job_start(ctx: dict[str, typing.Any]) -> None:
         root = typing.cast(Container, ctx[_ROOT_CONTAINER_KEY])
+        # Built unopened: `@inject`'s wrapper owns open/close (see `inject`), so the
+        # child stays closed here even if a user hook resolves-then-raises below.
         child = root.build_child_container(scope=Scope.REQUEST)
-        child.open()
         ctx[_CHILD_CONTAINER_KEY] = child
         if existing is not None:
             await existing(ctx)
@@ -68,8 +69,12 @@ def _wrap_job_end(existing: _Hook | None) -> _Hook:
         if existing is not None:
             await existing(ctx)
         child = ctx.pop(_CHILD_CONTAINER_KEY, None)
-        if child is not None:
-            await child.close_async()  # never leak the per-job child, even on the error path
+        # Safety net only: normally the owning `@inject` wrapper already closed the
+        # child in its own `finally`, or it was never opened (no `@inject` task) —
+        # both are no-ops here. Only closes if still open (e.g. a non-`@inject` task
+        # left it open, or arq itself raised between the task and this hook).
+        if child is not None and not child.closed:
+            await child.close_async()
 
     return on_job_end
 
@@ -154,9 +159,23 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
     async def wrapper(*args: typing.Any, **kwargs: typing.Any) -> T:  # noqa: ANN401
         ctx = typing.cast("dict[str, typing.Any]", args[0])
         child = typing.cast(Container, ctx[_CHILD_CONTAINER_KEY])
-        resolved = integrations.resolve_markers(child, di_params)
-        bound = visible_signature.bind(*args, **kwargs)
-        bound.apply_defaults()
-        return await func(**bound.arguments, **resolved)
+        # Ownership: open (and later close) the child only if this call finds it
+        # closed. Under nested `@inject` (an outer task awaiting an inner
+        # `@inject`-decorated function with the same ctx), the inner call sees an
+        # already-open child, does not own it, and must not close it — only the
+        # outer (owning) call's `finally` closes it, exactly once.
+        owns = child.closed
+        if owns:
+            child.open()
+        try:
+            resolved = integrations.resolve_markers(child, di_params)
+            bound = visible_signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            return await func(**bound.arguments, **resolved)
+        finally:
+            # Guarantees teardown even if arq skips on_job_end (e.g. it fails to
+            # serialize an unpicklable job result/exception after the task runs).
+            if owns:
+                await child.close_async()
 
     return wrapper
