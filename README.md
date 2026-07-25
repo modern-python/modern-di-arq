@@ -21,6 +21,8 @@
 
 Full guide: [arq integration docs](https://modern-di.modern-python.org/integrations/arq/)
 
+Usage example: [examples/](./examples)
+
 ## Installation
 
 ```bash
@@ -45,7 +47,7 @@ class Settings:
 
 
 class Greeter:
-    def __init__(self, settings: Settings) -> None:   # auto-injected by type
+    def __init__(self, settings: Settings) -> None:  # auto-injected by type
         self._settings = settings
 
     def greet(self, name: str) -> str:
@@ -59,9 +61,9 @@ class AppGroup(Group):
 
 @inject
 async def greet(
-    ctx: dict[str, typing.Any],       # arq passes its context dict as the first argument
+    ctx: dict[str, typing.Any],  # arq passes its context dict as the first argument
     name: str,
-    greeter: typing.Annotated[Greeter, FromDI(Greeter)],   # resolve by type
+    greeter: typing.Annotated[Greeter, FromDI(Greeter)],  # resolve by type
 ) -> str:
     return greeter.greet(name)
 
