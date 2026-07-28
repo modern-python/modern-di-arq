@@ -29,7 +29,7 @@ def make_settings(container: Container) -> type:
 
 
 def test_setup_di_returns_the_container() -> None:
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
 
     class WorkerSettings:
         functions: typing.ClassVar[list] = []
@@ -38,13 +38,13 @@ def test_setup_di_returns_the_container() -> None:
 
 
 def test_fetch_di_container_reads_root_from_ctx() -> None:
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     ctx = {"modern_di_container": container}
     assert fetch_di_container(ctx) is container
 
 
 def test_setup_di_rejects_double_call() -> None:
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
 
     class WorkerSettings:
         functions: typing.ClassVar[list] = []
@@ -57,7 +57,7 @@ def test_setup_di_rejects_double_call() -> None:
 async def test_worker_runs_startup_job_and_shutdown(arq_redis) -> None:  # noqa: ANN001
     app_teardowns.clear()
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings = make_settings(container)
 
     await arq_redis.enqueue_job("resolve_job")
@@ -73,7 +73,7 @@ async def test_worker_runs_startup_job_and_shutdown(arq_redis) -> None:  # noqa:
 
 
 async def test_restart_reopens_without_warning(arq_redis) -> None:  # noqa: ANN001, ARG001
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings = make_settings(container)
 
     await run_burst_worker(settings)  # first cycle: opens then closes the root
@@ -86,7 +86,7 @@ async def test_restart_reopens_without_warning(arq_redis) -> None:  # noqa: ANN0
 
 
 async def test_setup_di_supports_dict_settings(arq_redis) -> None:  # noqa: ANN001
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings: dict[str, typing.Any] = {"functions": [resolve_job]}
     setup_di(settings, container)
 
@@ -106,7 +106,7 @@ async def test_setup_di_supports_dict_settings(arq_redis) -> None:  # noqa: ANN0
 
 async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: ANN001
     calls: list[str] = []
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
 
     async def user_startup(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_startup")
@@ -114,9 +114,9 @@ async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: AN
 
     async def user_job_start(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_job_start")
-        # on_job_start builds the child but no longer opens it — it opens only within an
-        # @inject wrapper's ownership span, so the hook sees it closed
-        assert ctx["modern_di_request_container"].closed is True
+        # on_job_start builds the child; as of modern-di 3.1 a freshly built container is
+        # already open, so the hook sees it open rather than awaiting the wrapper's span
+        assert ctx["modern_di_request_container"].closed is False
 
     async def user_shutdown(ctx: dict[str, typing.Any]) -> None:
         calls.append("user_shutdown")

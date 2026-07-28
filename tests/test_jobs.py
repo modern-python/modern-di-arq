@@ -81,7 +81,7 @@ async def test_inject_resolves_app_and_request(arq_redis) -> None:  # noqa: ANN0
     results.clear()
     app_teardowns.clear()
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings = build_settings(container, [resolves_app_and_request])
 
     await arq_redis.enqueue_job("resolves_app_and_request", 7)
@@ -94,7 +94,7 @@ async def test_inject_resolves_app_and_request(arq_redis) -> None:  # noqa: ANN0
 
 async def test_inject_is_order_insensitive(arq_redis) -> None:  # noqa: ANN001
     results.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings = build_settings(container, [di_param_before_real_arg])
 
     await arq_redis.enqueue_job("di_param_before_real_arg", 42)
@@ -106,7 +106,7 @@ async def test_inject_is_order_insensitive(arq_redis) -> None:  # noqa: ANN001
 async def test_inject_passthrough_without_fromdi(arq_redis) -> None:  # noqa: ANN001
     results.clear()
     assert inject(no_fromdi) is no_fromdi  # no FromDI param: returned unchanged, not wrapped
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     settings = build_settings(container, [inject(no_fromdi)])  # inject returns func unchanged
 
     await arq_redis.enqueue_job("no_fromdi", 5)
@@ -117,7 +117,7 @@ async def test_inject_passthrough_without_fromdi(arq_redis) -> None:  # noqa: AN
 
 async def test_inject_closes_child_on_task_error(arq_redis) -> None:  # noqa: ANN001
     boom_teardowns.clear()
-    container = Container(groups=[Boom], validate=True)
+    container = Container(groups=[Boom])
     settings = build_settings(container, [raiser])
 
     await arq_redis.enqueue_job("raiser")
@@ -130,12 +130,12 @@ async def test_wrapper_guarantees_close_without_on_job_end() -> None:
     """The wrapper's own `finally` closes the child, so a skipped on_job_end leaks nothing."""
     results.clear()
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     container.open()
     ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
     await _wrap_job_start(None)(ctx)
     child = ctx[_CHILD_CONTAINER_KEY]
-    assert child.closed is True  # built unopened by on_job_start
+    assert child.closed is False  # 3.1: a freshly built child is open from construction
 
     await resolves_app_and_request(ctx, 7)  # invoke the @inject wrapper directly; on_job_end never runs
 
@@ -147,7 +147,7 @@ async def test_wrapper_guarantees_close_without_on_job_end() -> None:
 async def test_wrapper_closes_child_when_task_raises_without_on_job_end() -> None:
     """The wrapper's `finally` closes the child even when the task raises, without on_job_end."""
     boom_teardowns.clear()
-    container = Container(groups=[Boom], validate=True)
+    container = Container(groups=[Boom])
     container.open()
     ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
     await _wrap_job_start(None)(ctx)
@@ -187,7 +187,7 @@ async def test_nested_inject_inner_does_not_close_shared_child() -> None:
     """Only the outer (owning) wrapper closes the shared child; the inner call must not."""
     nested_calls.clear()
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     container.open()
     ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
     await _wrap_job_start(None)(ctx)
@@ -239,7 +239,7 @@ async def test_concurrent_inject_fanout_shares_one_child() -> None:
     """
     concurrent_calls.clear()
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     container.open()
     ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
     await _wrap_job_start(None)(ctx)
@@ -257,7 +257,7 @@ async def test_concurrent_inject_fanout_shares_one_child() -> None:
 async def test_on_job_end_safety_net_closes_a_still_open_child() -> None:
     """on_job_end is a safety net: it closes the child only when some non-@inject path left it open."""
     request_teardowns.clear()
-    container = Container(groups=[Dependencies], validate=True)
+    container = Container(groups=[Dependencies])
     container.open()
     ctx: dict[str, typing.Any] = {_ROOT_CONTAINER_KEY: container}
     await _wrap_job_start(None)(ctx)

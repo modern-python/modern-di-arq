@@ -73,7 +73,9 @@ class WorkerSettings:
     redis_settings = RedisSettings(host="localhost")
 
 
-setup_di(WorkerSettings, Container(groups=[AppGroup], validate=True))
+container = Container(groups=[AppGroup])
+setup_di(WorkerSettings, container)
+container.validate()  # optional fail-fast; must come after setup_di registers its providers
 ```
 
 Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with only their real arguments — `await pool.enqueue_job("greet", "world")` — the `FromDI` parameters are resolved for you. A task **must** declare arq's `ctx` dict as its first parameter; injection is order-insensitive otherwise. arq's `ctx` is a plain `dict` (not a dedicated message type), so no context provider is registered — read job metadata from `ctx`, and `fetch_di_container(ctx)` returns the root container.
