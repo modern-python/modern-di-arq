@@ -15,22 +15,6 @@ lint-ci:
     uv run ruff format --check
     uv run ruff check --no-fix
     uv run ty check
-    uv run python planning/index.py --check
-    uv run python planning/links.py
-
-# Print the planning change index (flat, newest-first) to stdout.
-index:
-    uv run python planning/index.py
-
-# Validate planning changes + decisions; CI runs this.
-check-planning:
-    uv run python planning/index.py --check
-
-# Check every relative Markdown link and heading anchor. Nothing else validates them:
-# every .md here is read on GitHub, where a rotted link stays invisible until someone
-# clicks it.
-check-links:
-    uv run python planning/links.py
 
 test *args:
     uv run --no-sync pytest {{ args }}

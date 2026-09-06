@@ -55,8 +55,8 @@ def _wrap_shutdown(container: Container, existing: _Hook | None) -> _Hook:
 def _wrap_job_start(existing: _Hook | None) -> _Hook:
     async def on_job_start(ctx: dict[str, typing.Any]) -> None:
         root = typing.cast(Container, ctx[_ROOT_CONTAINER_KEY])
-        # Built unopened: `@inject`'s wrapper(s) refcount open/close (see `inject`),
-        # so the child stays closed here even if a user hook resolves-then-raises below.
+        # Not opened here: `@inject`'s wrapper(s) refcount open/close (see `inject`), and
+        # modern-di already returns the child open, so `open()` there is a no-op re-entry.
         child = root.build_child_container(scope=Scope.REQUEST)
         ctx[_CHILD_CONTAINER_KEY] = child
         if existing is not None:
@@ -71,10 +71,9 @@ def _wrap_job_end(existing: _Hook | None) -> _Hook:
             await existing(ctx)
         child = ctx.pop(_CHILD_CONTAINER_KEY, None)
         ctx.pop(_CHILD_DEPTH_KEY, None)
-        # Safety net only: normally the owning `@inject` wrapper(s) already closed the
-        # child in their own `finally`, or it was never opened (no `@inject` task) —
-        # both are no-ops here. Only closes if still open (e.g. a non-`@inject` task
-        # left it open, or arq itself raised between the task and this hook).
+        # Closes it only if still open. For an `@inject` task the owning wrapper(s)
+        # already closed it in their own `finally`, so this is a no-op; a job that ran
+        # no wrapper never narrowed the child's lifetime, and this is what closes it.
         if child is not None and not child.closed:
             await child.close_async()
 
