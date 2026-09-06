@@ -232,10 +232,14 @@ async def fanout_job(ctx: dict[str, typing.Any]) -> None:
 
 
 async def test_concurrent_inject_fanout_shares_one_child() -> None:
-    """Two `@inject` siblings fanned out via `asyncio.gather` over the same ctx.
+    """INVARIANT: overlapping `@inject` calls over one job share a child closed once, by the last.
 
-    They must share one open child, refcounted, and close it exactly once — only
-    when the last sibling exits.
+    Broken by any teardown that decides on entry whether a call owns the child -- the boolean claim
+    rejected in `docs/adr/0003-per-job-child-teardown-is-reference-counted.md`, or an unconditional
+    close in `finally`. Concurrency is what makes that wrong and nesting does not: two siblings
+    under `asyncio.gather` both enter before either exits, so the claim goes to whichever entered
+    first, and when that one also exits first it finalizes REQUEST-scoped resources the other is
+    still holding. Nothing raises, and the surviving sibling is the one that looks broken.
     """
     concurrent_calls.clear()
     request_teardowns.clear()
