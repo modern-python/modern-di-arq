@@ -21,7 +21,7 @@
 
 Full guide: [arq integration docs](https://modern-di.modern-python.org/integrations/arq/)
 
-Usage example: [examples/](./examples)
+Usage example: [examples/](https://github.com/modern-python/modern-di-arq/tree/main/examples)
 
 ## Installation
 
@@ -91,7 +91,7 @@ Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with on
 
 ## 📦 [PyPI](https://pypi.org/project/modern-di-arq)
 
-## 📝 [License](LICENSE)
+## 📝 [License](https://github.com/modern-python/modern-di-arq/blob/main/LICENSE)
 
 ## Part of `modern-python`
 
