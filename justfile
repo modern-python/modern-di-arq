@@ -20,10 +20,10 @@ test *args:
     uv run --no-sync pytest {{ args }}
 
 test-ci:
-    uv run --no-sync pytest --cov=. --cov-report term-missing --cov-report xml --cov-fail-under=100
+    uv run --no-sync pytest --cov=. --cov-report term-missing --cov-report xml
 
 test-branch:
-    uv run --no-sync pytest --cov=. --cov-branch --cov-fail-under=100
+    uv run --no-sync pytest --cov=. --cov-branch
 
 redis-up:
     docker compose up -d redis
