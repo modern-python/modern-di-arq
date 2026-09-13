@@ -15,9 +15,9 @@ repository and ships as a separate PyPI package.
 ## Commands
 
 `just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth —
-`just --list`, or read it. Two things it does not say: a `ty` suppression is written `# ty: ignore`,
-never `# type: ignore`; and the suite needs a real Redis (`just redis-up`, or set `REDIS_URL`) —
-arq has no in-memory broker, so the tests that exercise the full path drive a real burst worker.
+`just --list`, or read it. The one thing it does not say: the suite needs a real Redis
+(`just redis-up`, or set `REDIS_URL`) — arq has no in-memory broker, so the tests that exercise
+the full path drive a real burst worker.
 
 ## Architecture
 
@@ -25,11 +25,6 @@ All implementation is `modern_di_arq/main.py`, short enough to read whole. Read 
 
 ## Workflow
 
-Real work **not scheduled** becomes a GitHub issue.
-
 Every link in `README.md` must be absolute: `https://github.com/modern-python/<repo>/blob/main/<path>`,
 or `.../tree/main/<path>` for a directory. Never a relative path: `README.md` is also the PyPI long
 description, and PyPI does not rewrite relative links, so a relative one 404s on the package page.
-
-An invariant is a test whose name is the claim, with a docstring opening `INVARIANT:` and a second
-paragraph naming **what breaks it** — design rationale, not a report of what this one test catches.
