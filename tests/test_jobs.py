@@ -298,3 +298,10 @@ def test_inject_rejects_var_keyword_with_fromdi() -> None:
 
     with pytest.raises(TypeError):
         inject(bad_task)
+
+
+async def test_inject_without_setup_di_names_the_fix() -> None:
+    ctx: dict[str, typing.Any] = {}
+
+    with pytest.raises(RuntimeError, match=r"setup_di\(worker_settings, container\)"):
+        await resolves_app_and_request(ctx, 7)

@@ -86,7 +86,7 @@ Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with on
 |---|---|
 | `setup_di(worker_settings, container)` | Seeds the root container into arq's `ctx` and wires root + per-job lifecycle onto `on_startup`/`on_shutdown`/`on_job_start`/`on_job_end`. Accepts a `WorkerSettings` class/object or a settings `dict`; composes with existing hooks; returns the container. Raises `TypeError` if called twice on the same `worker_settings` |
 | `FromDI(dependency)` | Inert marker for `Annotated[T, FromDI(...)]` in task signatures; accepts a provider instance or a type |
-| `inject(task)` | Decorator that resolves `FromDI`-annotated parameters from the per-job `Scope.REQUEST` child. Order-insensitive; passthrough for tasks with no `FromDI`; raises `TypeError` at decoration if the task also declares `*args`/`**kwargs` |
+| `inject(task)` | Decorator that resolves `FromDI`-annotated parameters from the per-job `Scope.REQUEST` child. Order-insensitive; passthrough for tasks with no `FromDI`; raises `TypeError` at decoration if the task also declares `*args`/`**kwargs`. Raises `RuntimeError` naming `setup_di` when a job reaches it without the modern-di hooks installed |
 | `fetch_di_container(ctx)` | Returns the root container from an arq `ctx` dict |
 
 ## 📦 [PyPI](https://pypi.org/project/modern-di-arq)
