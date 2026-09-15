@@ -30,6 +30,18 @@ def _set_setting(worker_settings: typing.Any, name: str, value: typing.Any) -> N
         setattr(worker_settings, name, value)
 
 
+def _fetch_child_container(ctx: dict[str, typing.Any]) -> Container:
+    try:
+        return typing.cast(Container, ctx[_CHILD_CONTAINER_KEY])
+    except KeyError:
+        msg = (
+            "No modern-di container found for this job. "
+            "Call setup_di(worker_settings, container) so jobs pass through the modern-di hooks "
+            "before using @inject."
+        )
+        raise RuntimeError(msg) from None
+
+
 _Hook = typing.Callable[[dict[str, typing.Any]], typing.Awaitable[None]]
 
 
@@ -163,7 +175,7 @@ def inject(func: typing.Callable[..., typing.Awaitable[T]]) -> typing.Callable[.
     @functools.wraps(func)
     async def wrapper(*args: typing.Any, **kwargs: typing.Any) -> T:  # noqa: ANN401
         ctx = typing.cast("dict[str, typing.Any]", args[0])
-        child = typing.cast(Container, ctx[_CHILD_CONTAINER_KEY])
+        child = _fetch_child_container(ctx)
         # Reference-count opens so nested AND concurrent (@inject fan-out via gather)
         # share one open child and close it exactly once, when the LAST @inject body
         # exits. The check/open/increment run without an await, so asyncio cannot
