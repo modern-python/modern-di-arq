@@ -1,33 +1,13 @@
 # Per-job child teardown is reference-counted, not owned
 
-**Decision:** `inject`'s wrapper tracks an open depth on the job's `ctx` and closes the per-job
-child on the 1→0 transition. It does not decide, on entry, whether it is the call that owns the
-child.
-
-Ownership is the smaller and more obvious mechanism, and it was the first one shipped here: a
-boolean taken on entry (then, `owns = child.closed`), closing in `finally` only `if owns`. It reads
-correctly and it handles the case that motivated moving teardown out of `on_job_end` — an outer
-`@inject` task awaiting an inner `@inject` function over the same `ctx`, where the inner call must
-not close a child the outer one is still using.
-
-It is wrong as soon as two `@inject` calls are concurrent rather than nested, and the fault is the
-entry-time claim itself, not the state it happened to read. A job coroutine that is not itself
-`@inject` can `asyncio.gather` two decorated helpers over the same `ctx`. Both enter before either
-exits, so exactly one of them takes the claim and the other defers to it — and the claimant is the
-one that entered first, which says nothing about which one exits last. When it is the faster
-sibling, its `finally` runs the `Scope.REQUEST` finalizers while the slower sibling is still
-awaiting with a resolved handle to what was just finalized. Nothing raises. The symptom is a
-resource used after teardown, in the sibling that happened to be slower, which is why an
-adversarial review rather than the suite found it.
-
-A count has no such entry-time question to get wrong: the child is closed by whichever call is last
-to exit, whether the calls nested or overlapped, and whether or not it is the one that opened it.
-Both transitions run with no `await` between the read and the write, so the event loop cannot
-interleave another call into the middle of either. The invariant is
-`test_concurrent_inject_fanout_shares_one_child` in `tests/test_jobs.py`, which is red under the
-boolean version and green under the count.
-
-**Revisit trigger:** the child's lifetime stops being derived from `@inject` spans — arq gaining a
-hook that is guaranteed to run after the task on every path, or modern-di growing a per-scope
-context manager the wrapper could enter instead. Either removes the bookkeeping rather than
-simplifying it, and the count goes with it.
+`inject`'s wrapper keeps an open depth on the job's `ctx` and closes the `Scope.REQUEST` child on
+the 1 to 0 transition. The boolean claim it replaced, `owns = child.closed` taken on entry and
+honoured in `finally`, is smaller and handles the nested case that moved teardown out of
+`on_job_end`, but it is wrong as soon as two `@inject` calls overlap rather than nest: a job
+coroutine that is not itself decorated can `asyncio.gather` two decorated helpers over one `ctx`,
+the claim goes to whichever entered first, and when that one also exits first it runs the
+REQUEST-scoped finalizers while its sibling still holds a resolved handle, with nothing raising. A
+count has no entry-time question to get wrong, and each transition reads and writes with no `await`
+between, so the loop cannot interleave; `on_job_end` then closes the child only as a safety net for
+a job that ran no wrapper. `tests/test_jobs.py::test_concurrent_inject_fanout_shares_one_child` is
+red under the boolean and green under the count.
