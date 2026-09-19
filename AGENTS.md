@@ -28,3 +28,17 @@ All implementation is `modern_di_arq/main.py`, short enough to read whole. Read 
 Every link in `README.md` must be absolute: `https://github.com/modern-python/<repo>/blob/main/<path>`,
 or `.../tree/main/<path>` for a directory. Never a relative path: `README.md` is also the PyPI long
 description, and PyPI does not rewrite relative links, so a relative one 404s on the package page.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues on `modern-python/modern-di-arq`, via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
