@@ -97,11 +97,12 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
 
     Seeds the root container into the worker ``ctx`` (arq's state store) and
     wraps the worker's lifecycle hooks: ``on_startup``/``on_shutdown`` open and
-    close the root; ``on_job_start`` builds an unopened ``Scope.REQUEST`` child
-    per job, opened and closed by ``@inject``-decorated task(s) around their
-    own bodies — reference-counted, so nested and concurrent (``asyncio.gather``)
-    ``@inject`` calls over the same job share one open child, closed exactly
-    once by the last to exit (``on_job_end`` only closes it as a safety net).
+    close the root; ``on_job_start`` builds one ``Scope.REQUEST`` child per job
+    (open from construction, as modern-di containers are); ``@inject``-decorated
+    task(s) narrow its lifetime to their own bodies — reference-counted, so nested
+    and concurrent (``asyncio.gather``) ``@inject`` calls over the same job share
+    that one child, closed exactly once by the last to exit (``on_job_end`` only
+    closes it as a safety net).
     Any hook the user already set still runs. Accepts a class/object
     ``worker_settings`` (attribute access) or a ``dict`` (item access).
     Returns *container*.
