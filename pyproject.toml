@@ -28,7 +28,12 @@ Issues = "https://github.com/modern-python/modern-di-arq/issues"
 Changelog = "https://github.com/modern-python/modern-di-arq/releases"
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov", "pytest-asyncio"]
+# Floored so `uv sync --resolution lowest-direct` resolves a usable harness, not each name's first release.
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "pytest-asyncio>=0.24",
+]
 lint = ["ty", "ruff", "eof-fixer", "typing-extensions"]
 
 [build-system]
