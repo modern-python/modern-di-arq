@@ -17,7 +17,7 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 
-[Modern-DI](https://github.com/modern-python/modern-di) integration for [arq](https://arq-docs.helpmanual.io).
+[modern-di](https://github.com/modern-python/modern-di) integration for [arq](https://arq-docs.helpmanual.io).
 
 Full guide: [arq integration docs](https://modern-di.modern-python.org/integrations/arq/)
 
