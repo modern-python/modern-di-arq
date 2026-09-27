@@ -282,7 +282,7 @@ def test_inject_rejects_var_positional_with_fromdi() -> None:
         app_instance: typing.Annotated[AppResource, FromDI(AppResource)],  # noqa: ARG001
         *args: int,
     ) -> None:
-        results["never_called"] = args  # pragma: no cover
+        results["never_called"] = args  # pragma: no cover - never runs; inject rejects the signature first
 
     with pytest.raises(TypeError):
         inject(bad_task)
@@ -294,7 +294,7 @@ def test_inject_rejects_var_keyword_with_fromdi() -> None:
         app_instance: typing.Annotated[AppResource, FromDI(AppResource)],  # noqa: ARG001
         **kwargs: int,
     ) -> None:
-        results["never_called"] = kwargs  # pragma: no cover
+        results["never_called"] = kwargs  # pragma: no cover - never runs; inject rejects the signature first
 
     with pytest.raises(TypeError):
         inject(bad_task)
