@@ -16,7 +16,7 @@ async def arq_redis() -> typing.AsyncIterator[ArqRedis]:
     pool = await create_pool(settings)
     try:
         await pool.ping()
-    except Exception as exc:  # noqa: BLE001  # pragma: no cover
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - only when Redis is unreachable; the suite runs against one
         await pool.aclose()
         pytest.skip(f"Redis not available at {REDIS_URL}: {exc}")
     await pool.flushdb()
