@@ -31,7 +31,9 @@ uv add modern-di-arq      # or: pip install modern-di-arq
 
 ## Usage
 
-`setup_di` seeds the root container into arq's `ctx` dict and wires four of arq's lifecycle hooks: `on_startup`/`on_shutdown` open and close the root container, and `on_job_start` builds a `Scope.REQUEST` child container per job. Decorate a task with `@inject` to resolve its `FromDI`-marked parameters from that per-job child — the child is open only while `@inject`-decorated task body/bodies are running, reference-counted so nested and concurrent (`asyncio.gather`) `@inject` calls over the same job share one open child and close it exactly once, guaranteeing teardown even if arq skips `on_job_end`.
+`setup_di` seeds the root container into arq's `ctx` dict and wires four of arq's lifecycle hooks: `on_startup`/`on_shutdown` open and close the root container, `on_job_start` builds a `Scope.REQUEST` child container per job, and `on_job_end` closes it as a fallback.
+
+Decorate a task with `@inject` to resolve its `FromDI`-marked parameters from that per-job child. The child is open from `on_job_start` until the last `@inject`-decorated call for the job exits, which closes it. Nested and concurrent (`asyncio.gather`) `@inject` calls over the same job share the one child through a reference count, so it closes exactly once, and teardown still happens if arq skips `on_job_end`.
 
 ```python
 import typing
@@ -78,7 +80,7 @@ setup_di(WorkerSettings, container)
 container.validate()  # optional fail-fast; must come after setup_di registers its providers
 ```
 
-Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with only their real arguments — `await pool.enqueue_job("greet", "world")` — the `FromDI` parameters are resolved for you. A task **must** declare arq's `ctx` dict as its first parameter; injection is order-insensitive otherwise. arq's `ctx` is a plain `dict` (not a dedicated message type), so no context provider is registered — read job metadata from `ctx`, and `fetch_di_container(ctx)` returns the root container.
+Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with only their real arguments, as in `await pool.enqueue_job("greet", "world")`. The `FromDI` parameters are resolved for you. A task must declare arq's `ctx` dict as its first parameter; injection is order-insensitive otherwise. arq's `ctx` is a plain `dict` (not a dedicated message type), so no context provider is registered. Read job metadata from `ctx`, and `fetch_di_container(ctx)` returns the root container.
 
 ## API
 
@@ -95,7 +97,7 @@ Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with on
 
 ## Part of `modern-python`
 
-Built on [`modern-di`](https://github.com/modern-python/modern-di), a dependency-injection framework with IoC container and scopes.
+Built on [`modern-di`](https://github.com/modern-python/modern-di), a dependency-injection framework with an IoC container and scopes.
 
 Browse the full list of templates and libraries in
-[`modern-python`](https://github.com/modern-python) — see the org profile for the categorized index.
+[`modern-python`](https://github.com/modern-python); the org profile has the categorized index.
