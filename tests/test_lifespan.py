@@ -1,10 +1,9 @@
 import typing
-import warnings
 
 import pytest
 from arq.connections import RedisSettings
 from arq.worker import Worker
-from modern_di import Container, exceptions
+from modern_di import Container
 
 import modern_di_arq
 from modern_di_arq import FromDI, fetch_di_container, inject, setup_di
@@ -72,16 +71,17 @@ async def test_worker_runs_startup_job_and_shutdown(arq_redis) -> None:  # noqa:
     assert container.closed is True
 
 
-async def test_restart_reopens_without_warning(arq_redis) -> None:  # noqa: ANN001, ARG001
+async def test_restart_reopens_root(arq_redis) -> None:  # noqa: ANN001
     container = Container(groups=[Dependencies])
     settings = make_settings(container)
 
     await run_burst_worker(settings)  # first cycle: opens then closes the root
     assert container.closed is True
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", exceptions.ContainerClosedWarning)
-        await run_burst_worker(settings)  # second cycle must reopen without warning
+    job = await arq_redis.enqueue_job("resolve_job")
+    assert job is not None
+    await run_burst_worker(settings)  # second cycle must reopen the root before the job resolves
+    assert await job.result(timeout=1) is None
     assert container.closed is True
 
 
