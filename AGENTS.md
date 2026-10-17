@@ -7,16 +7,16 @@ repository.
 
 `modern-di-arq` is an [arq](https://arq-docs.helpmanual.io) adapter over
 [`modern-di`](https://github.com/modern-python/modern-di); [`CONTEXT.md`](CONTEXT.md) opens with
-what it does and owns the vocabulary — read it before naming a concept in code, a test name, or an
+what it does and owns the vocabulary. Read it before naming a concept in code, a test name, or an
 issue title. arq's **task** and its **job** are the pair that gets conflated here, and `CONTEXT.md`
 pins the difference. This is one of that project's integrations, each of which lives in a separate
 repository and ships as a separate PyPI package.
 
 ## Commands
 
-`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth —
+`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth:
 `just --list`, or read it. The one thing it does not say: the suite needs a real Redis
-(`just redis-up`, or set `REDIS_URL`) — arq has no in-memory broker, so the tests that exercise
+(`just redis-up`, or set `REDIS_URL`); arq has no in-memory broker, so the tests that exercise
 the full path drive a real burst worker.
 
 ## Architecture
