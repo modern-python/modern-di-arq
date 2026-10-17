@@ -121,9 +121,10 @@ The worker still builds and closes a child container per job, and your own `on_s
 | `inject(task)` | Decorator that resolves `FromDI`-annotated parameters from the per-job `Scope.REQUEST` child. Order-insensitive; passthrough for tasks with no `FromDI`; raises `TypeError` at decoration if the task also declares `*args`/`**kwargs`. Raises `RuntimeError` naming `setup_di` when a job reaches it without the modern-di hooks installed |
 | `fetch_di_container(ctx)` | Returns the root container from an arq `ctx` dict |
 
-## 📦 [PyPI](https://pypi.org/project/modern-di-arq)
+## Links
 
-## 📝 [License](https://github.com/modern-python/modern-di-arq/blob/main/LICENSE)
+- [PyPI](https://pypi.org/project/modern-di-arq)
+- [License](https://github.com/modern-python/modern-di-arq/blob/main/LICENSE)
 
 ## Part of `modern-python`
 
