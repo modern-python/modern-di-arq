@@ -58,10 +58,12 @@ def _wrap_startup(container: Container, existing: _Hook | None, *, manage_lifesp
 
 def _wrap_shutdown(container: Container, existing: _Hook | None, *, manage_lifespan: bool) -> _Hook:
     async def on_shutdown(ctx: dict[str, typing.Any]) -> None:
-        if existing is not None:
-            await existing(ctx)
-        if manage_lifespan:
-            await container.close_async()  # run APP-scoped finalizers
+        try:
+            if existing is not None:
+                await existing(ctx)
+        finally:
+            if manage_lifespan:
+                await container.close_async()  # run APP-scoped finalizers
 
     return on_shutdown
 
