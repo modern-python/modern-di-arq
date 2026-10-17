@@ -53,6 +53,26 @@ def test_setup_di_rejects_double_call() -> None:
         setup_di(WorkerSettings, container)
 
 
+async def test_root_closes_when_the_user_on_shutdown_raises() -> None:
+    app_teardowns.clear()
+    container = Container(groups=[Dependencies])
+
+    async def failing_shutdown(_ctx: dict[str, typing.Any]) -> None:
+        msg = "user shutdown failed"
+        raise RuntimeError(msg)
+
+    settings: dict[str, typing.Any] = {"functions": [], "on_shutdown": failing_shutdown}
+    setup_di(settings, container)
+    await settings["on_startup"](settings["ctx"])
+    container.resolve_provider(Dependencies.app_factory)
+
+    with pytest.raises(RuntimeError, match="user shutdown failed"):
+        await settings["on_shutdown"](settings["ctx"])
+
+    assert container.closed is True
+    assert app_teardowns == ["app-closed"]
+
+
 async def test_worker_runs_startup_job_and_shutdown(arq_redis) -> None:  # noqa: ANN001
     app_teardowns.clear()
     request_teardowns.clear()
