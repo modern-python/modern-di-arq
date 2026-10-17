@@ -140,3 +140,65 @@ async def test_setup_di_composes_with_user_hooks(arq_redis) -> None:  # noqa: AN
     await run_burst_worker(WorkerSettings)
 
     assert calls == ["user_startup", "user_job_start", "user_job_end", "user_shutdown"]
+
+
+def make_unmanaged_settings(container: Container) -> type:
+    class WorkerSettings:
+        functions: typing.ClassVar[list] = [resolve_job]
+
+    setup_di(WorkerSettings, container, manage_lifespan=False)
+    return WorkerSettings
+
+
+async def test_manage_lifespan_false_leaves_the_root_alone(arq_redis) -> None:  # noqa: ANN001
+    app_teardowns.clear()
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies])
+    settings = make_unmanaged_settings(container)
+
+    await arq_redis.enqueue_job("resolve_job")
+    await run_burst_worker(settings)
+
+    assert request_teardowns == ["request-closed"]
+    assert app_teardowns == []
+    assert container.closed is False
+    await container.close_async()
+
+
+async def test_manage_lifespan_false_lets_the_user_own_the_root(arq_redis) -> None:  # noqa: ANN001
+    app_teardowns.clear()
+    request_teardowns.clear()
+    container = Container(groups=[Dependencies])
+    settings = make_unmanaged_settings(container)
+
+    await arq_redis.enqueue_job("resolve_job")
+    async with container:
+        await run_burst_worker(settings)
+        assert app_teardowns == []
+
+    assert request_teardowns == ["request-closed"]
+    assert app_teardowns == ["app-closed"]
+
+
+async def test_manage_lifespan_false_still_runs_user_hooks(arq_redis) -> None:  # noqa: ANN001
+    calls: list[str] = []
+    container = Container(groups=[Dependencies])
+
+    async def user_startup(_ctx: dict[str, typing.Any]) -> None:
+        calls.append("user_startup")
+
+    async def user_shutdown(_ctx: dict[str, typing.Any]) -> None:
+        calls.append("user_shutdown")
+
+    class WorkerSettings:
+        functions: typing.ClassVar[list] = [resolve_job]
+        on_startup = user_startup
+        on_shutdown = user_shutdown
+
+    setup_di(WorkerSettings, container, manage_lifespan=False)
+    await arq_redis.enqueue_job("resolve_job")
+    await run_burst_worker(WorkerSettings)
+
+    assert calls == ["user_startup", "user_shutdown"]
+    assert container.closed is False
+    await container.close_async()
