@@ -45,9 +45,10 @@ def _fetch_child_container(ctx: dict[str, typing.Any]) -> Container:
 _Hook = typing.Callable[[dict[str, typing.Any]], typing.Awaitable[None]]
 
 
-def _wrap_startup(container: Container, existing: _Hook | None) -> _Hook:
+def _wrap_startup(container: Container, existing: _Hook | None, *, manage_lifespan: bool) -> _Hook:
     async def on_startup(ctx: dict[str, typing.Any]) -> None:
-        container.open()  # reopen for restart / worker re-entry; no-op if already open
+        if manage_lifespan:
+            container.open()  # reopen for restart / worker re-entry; no-op if already open
         if existing is not None:
             await existing(ctx)
 
@@ -55,11 +56,12 @@ def _wrap_startup(container: Container, existing: _Hook | None) -> _Hook:
     return on_startup
 
 
-def _wrap_shutdown(container: Container, existing: _Hook | None) -> _Hook:
+def _wrap_shutdown(container: Container, existing: _Hook | None, *, manage_lifespan: bool) -> _Hook:
     async def on_shutdown(ctx: dict[str, typing.Any]) -> None:
         if existing is not None:
             await existing(ctx)
-        await container.close_async()  # run APP-scoped finalizers
+        if manage_lifespan:
+            await container.close_async()  # run APP-scoped finalizers
 
     return on_shutdown
 
@@ -92,7 +94,7 @@ def _wrap_job_end(existing: _Hook | None) -> _Hook:
     return on_job_end
 
 
-def setup_di(worker_settings: typing.Any, container: Container) -> Container:  # noqa: ANN401
+def setup_di(worker_settings: typing.Any, container: Container, *, manage_lifespan: bool = True) -> Container:  # noqa: ANN401
     """Wire *container* into an arq worker.
 
     Seeds the root container into the worker ``ctx`` (arq's state store) and
@@ -103,6 +105,9 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
     and concurrent (``asyncio.gather``) ``@inject`` calls over the same job share
     that one child, closed exactly once by the last to exit (``on_job_end`` only
     closes it as a safety net).
+    With ``manage_lifespan=False`` the startup and shutdown hooks leave the
+    root alone, so the caller opens and closes it, for example when several
+    workers or apps share one container; everything per job works as before.
     Any hook the user already set still runs. Accepts a class/object
     ``worker_settings`` (attribute access) or a ``dict`` (item access).
     Returns *container*.
@@ -120,9 +125,15 @@ def setup_di(worker_settings: typing.Any, container: Container) -> Container:  #
     ctx[_ROOT_CONTAINER_KEY] = container
     _set_setting(worker_settings, "ctx", ctx)
 
-    _set_setting(worker_settings, "on_startup", _wrap_startup(container, existing_on_startup))
     _set_setting(
-        worker_settings, "on_shutdown", _wrap_shutdown(container, _get_setting(worker_settings, "on_shutdown"))
+        worker_settings,
+        "on_startup",
+        _wrap_startup(container, existing_on_startup, manage_lifespan=manage_lifespan),
+    )
+    _set_setting(
+        worker_settings,
+        "on_shutdown",
+        _wrap_shutdown(container, _get_setting(worker_settings, "on_shutdown"), manage_lifespan=manage_lifespan),
     )
     _set_setting(worker_settings, "on_job_start", _wrap_job_start(_get_setting(worker_settings, "on_job_start")))
     _set_setting(worker_settings, "on_job_end", _wrap_job_end(_get_setting(worker_settings, "on_job_end")))

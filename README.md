@@ -82,11 +82,25 @@ container.validate()  # optional fail-fast check of the provider graph
 
 Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with only their real arguments, as in `await pool.enqueue_job("greet", "world")`. The `FromDI` parameters are resolved for you. A task must declare arq's `ctx` dict as its first parameter; injection is order-insensitive otherwise. arq's `ctx` is a plain `dict` (not a dedicated message type), so no context provider is registered. Read job metadata from `ctx`, and `fetch_di_container(ctx)` returns the root container.
 
+### Sharing a container
+
+When one container serves several apps or workers, only one owner should open and close the root. Otherwise the first worker to shut down closes it for everyone else. Pass `manage_lifespan=False` and own the root yourself:
+
+```python
+container = Container(groups=[AppGroup])
+setup_di(WorkerSettings, container, manage_lifespan=False)
+
+async with container:
+    ...  # run the worker and the other apps here
+```
+
+The worker still builds and closes a child container per job, and your own `on_startup` and `on_shutdown` hooks still run. APP-scoped finalizers run once, when the `async with` block exits.
+
 ## API
 
 | Symbol | Description |
 |---|---|
-| `setup_di(worker_settings, container)` | Seeds the root container into arq's `ctx` and wires root + per-job lifecycle onto `on_startup`/`on_shutdown`/`on_job_start`/`on_job_end`. Accepts a `WorkerSettings` class/object or a settings `dict`; composes with existing hooks; returns the container. Raises `TypeError` if called twice on the same `worker_settings` |
+| `setup_di(worker_settings, container, *, manage_lifespan=True)` | Seeds the root container into arq's `ctx` and wires root + per-job lifecycle onto `on_startup`/`on_shutdown`/`on_job_start`/`on_job_end`. With `manage_lifespan=False`, `on_startup` and `on_shutdown` leave the root container alone and you open and close it yourself. Accepts a `WorkerSettings` class/object or a settings `dict`; composes with existing hooks; returns the container. Raises `TypeError` if called twice on the same `worker_settings` |
 | `FromDI(dependency)` | Inert marker for `Annotated[T, FromDI(...)]` in task signatures; accepts a provider instance or a type |
 | `inject(task)` | Decorator that resolves `FromDI`-annotated parameters from the per-job `Scope.REQUEST` child. Order-insensitive; passthrough for tasks with no `FromDI`; raises `TypeError` at decoration if the task also declares `*args`/`**kwargs`. Raises `RuntimeError` naming `setup_di` when a job reaches it without the modern-di hooks installed |
 | `fetch_di_container(ctx)` | Returns the root container from an arq `ctx` dict |
