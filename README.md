@@ -82,6 +82,22 @@ container.validate()  # optional fail-fast check of the provider graph
 
 Run the worker as usual (`arq mymodule.WorkerSettings`) and enqueue jobs with only their real arguments, as in `await pool.enqueue_job("greet", "world")`. The `FromDI` parameters are resolved for you. A task must declare arq's `ctx` dict as its first parameter; injection is order-insensitive otherwise. arq's `ctx` is a plain `dict` (not a dedicated message type), so no context provider is registered. Read job metadata from `ctx`, and `fetch_di_container(ctx)` returns the root container.
 
+### Your own lifecycle hooks
+
+arq has one slot for each of `on_startup`, `on_shutdown`, `on_job_start` and `on_job_end`, and `setup_di` fills all four with wrappers that call your hooks. Set your hooks on `worker_settings` before calling `setup_di`:
+
+```python
+class WorkerSettings:
+    functions = [greet]
+    on_startup = startup
+    on_shutdown = shutdown
+
+
+setup_di(WorkerSettings, container)
+```
+
+Don't assign these hooks after `setup_di`, and don't pass them to `create_worker(settings, on_shutdown=...)` or to `Worker(...)`. Either way your hook replaces the wrapper and nothing raises an error. If `on_shutdown` is replaced, the root container never closes and APP-scoped finalizers never run. If `on_job_end` is replaced, jobs without `@inject` never close their child container. If `on_job_start` is replaced, `@inject` tasks raise `RuntimeError`.
+
 ### Sharing a container
 
 When one container serves several apps or workers, only one owner should open and close the root. Otherwise the first worker to shut down closes it for everyone else. Pass `manage_lifespan=False` and own the root yourself:
