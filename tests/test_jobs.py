@@ -72,7 +72,7 @@ def build_settings(container: Container, functions: list) -> type:
     class WorkerSettings:
         pass
 
-    WorkerSettings.functions = functions  # ty: ignore[unresolved-attribute]
+    WorkerSettings.functions = functions  # ty: ignore[missing-attribute]
     setup_di(WorkerSettings, container)
     return WorkerSettings
 
