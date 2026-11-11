@@ -126,6 +126,8 @@ The worker still builds and closes a child container per job, and your own `on_s
 - [PyPI](https://pypi.org/project/modern-di-arq)
 - [License](https://github.com/modern-python/modern-di-arq/blob/main/LICENSE)
 
+If this project saves you time, consider giving it a star on GitHub.
+
 ## Part of `modern-python`
 
 Built on [`modern-di`](https://github.com/modern-python/modern-di), a dependency-injection framework with an IoC container and scopes.
